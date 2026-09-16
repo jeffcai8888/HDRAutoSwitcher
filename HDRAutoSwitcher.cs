@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Windows.Forms;
 
 static class NativeMethods
 {
@@ -60,13 +62,6 @@ static class NativeMethods
         public DISPLAYCONFIG_PATH_SOURCE_INFO sourceInfo;
         public DISPLAYCONFIG_PATH_TARGET_INFO targetInfo;
         public uint flags;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct DISPLAYCONFIG_2DREGION
-    {
-        public uint cx;
-        public uint cy;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -169,22 +164,22 @@ static class NativeMethods
     public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_ADVANCED_COLOR_INFO requestPacket);
 
     [DllImport("user32.dll")]
-    public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE requestPacket);
-
-    [DllImport("user32.dll")]
     public static extern int DisplayConfigSetDeviceInfo(ref DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE setPacket);
 
     [DllImport("user32.dll")]
     public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_ADVANCED_COLOR_INFO_2 requestPacket);
-
-    [DllImport("user32.dll")]
-    public static extern int DisplayConfigSetDeviceInfo(ref DISPLAYCONFIG_ADVANCED_COLOR_INFO_2 setPacket);
 
     [DllImport("ntdll.dll")]
     public static extern int RtlGetVersion(ref OSVERSIONINFOEXW versionInfo);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern bool EnumDisplayDevices(string lpDevice, uint iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, uint dwFlags);
+
+    [DllImport("kernel32.dll")]
+    public static extern bool AttachConsole(uint dwProcessId);
+
+    [DllImport("user32.dll")]
+    public static extern bool DestroyIcon(IntPtr handle);
 }
 
 class HdrController
@@ -344,14 +339,360 @@ class HdrController
     }
 }
 
+// 监控状态机：控制台与图形界面共用
+class HdrMonitor
+{
+    public readonly HdrController Hdr = new HdrController();
+    public readonly List<string> Names = new List<string>();
+    public bool CurrentHdrEnabled;
+    public Action<string> OnLog = delegate { };
+    public Action<bool> OnHdrStateChanged = delegate { };
+
+    private bool _anyRunning;
+    private bool _hdrHeld;
+    private bool _originalHdrEnabled;
+
+    public static string ConfigPath
+    {
+        get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "HDRAutoSwitcher.ini"); }
+    }
+
+    // 返回 null 表示成功，否则为错误消息
+    public string LoadConfig()
+    {
+        if (!File.Exists(ConfigPath))
+            return "找不到配置文件 " + ConfigPath;
+
+        var loaded = new List<string>();
+        foreach (var line in File.ReadAllLines(ConfigPath))
+        {
+            var t = line.Trim();
+            if (t.Length == 0 || t.StartsWith("#") || t.StartsWith(";"))
+                continue;
+            if (t.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                t = t.Substring(0, t.Length - 4);
+            if (t.Length > 0 && !loaded.Contains(t))
+                loaded.Add(t);
+        }
+        if (loaded.Count == 0)
+            return "配置文件中没有有效的进程名（每行一个，# 或 ; 开头为注释）";
+
+        Names.Clear();
+        Names.AddRange(loaded);
+        _anyRunning = AnyProcessRunning();
+        return null;
+    }
+
+    public bool InitDisplay(out string error)
+    {
+        error = null;
+        bool current;
+        if (!Hdr.RefreshColorInfo(out current))
+        {
+            error = "无法读取主显示器状态: " + Hdr.LastError;
+            return false;
+        }
+        CurrentHdrEnabled = current;
+        return true;
+    }
+
+    public void Tick()
+    {
+        bool enabled;
+        if (Hdr.RefreshColorInfo(out enabled))
+        {
+            if (enabled != CurrentHdrEnabled)
+            {
+                CurrentHdrEnabled = enabled;
+                OnHdrStateChanged(enabled);
+            }
+        }
+
+        if (Names.Count == 0)
+            return;
+
+        bool nowRunning = AnyProcessRunning();
+        if (nowRunning && !_anyRunning)
+        {
+            if (Hdr.Supported && Hdr.RefreshColorInfo(out enabled))
+            {
+                _originalHdrEnabled = enabled;
+                _hdrHeld = true;
+                OnLog("检测到目标进程启动。原 HDR 状态: " + (enabled ? "开" : "关"));
+                if (!enabled)
+                {
+                    string error;
+                    if (Hdr.SetHdr(true, out error))
+                    {
+                        CurrentHdrEnabled = true;
+                        OnLog("已打开主显示器 HDR。");
+                        OnHdrStateChanged(true);
+                    }
+                    else
+                    {
+                        OnLog("打开 HDR 失败: " + error);
+                    }
+                }
+                else
+                {
+                    OnLog("HDR 已开启，保持不变。");
+                }
+            }
+        }
+        else if (!nowRunning && _anyRunning)
+        {
+            OnLog("目标进程已全部退出。");
+            RestoreHdr();
+        }
+        _anyRunning = nowRunning;
+    }
+
+    public void RestoreHdr()
+    {
+        if (!_hdrHeld || !Hdr.Supported)
+            return;
+        _hdrHeld = false;
+
+        bool enabled;
+        if (Hdr.RefreshColorInfo(out enabled) && enabled == _originalHdrEnabled)
+            return;
+
+        string error;
+        if (Hdr.SetHdr(_originalHdrEnabled, out error))
+        {
+            CurrentHdrEnabled = _originalHdrEnabled;
+            OnLog("已恢复 HDR 状态: " + (_originalHdrEnabled ? "开" : "关"));
+            OnHdrStateChanged(_originalHdrEnabled);
+        }
+        else
+        {
+            OnLog("恢复 HDR 失败: " + error);
+        }
+    }
+
+    private bool AnyProcessRunning()
+    {
+        foreach (var n in Names)
+        {
+            if (Process.GetProcessesByName(n).Length > 0)
+                return true;
+        }
+        return false;
+    }
+}
+
+class MainForm : Form
+{
+    private readonly HdrMonitor _monitor = new HdrMonitor();
+    private readonly System.Windows.Forms.Timer _timer;
+    private readonly NotifyIcon _tray;
+    private readonly Label _lblNames;
+    private readonly Label _lblHdr;
+    private readonly TextBox _txtLog;
+    private Icon _iconOn;
+    private Icon _iconOff;
+    private bool _reallyExit;
+
+    public MainForm()
+    {
+        Text = "HDR Auto Switcher";
+        ClientSize = new Size(520, 380);
+        StartPosition = FormStartPosition.CenterScreen;
+        MinimizeBox = true;
+        MaximizeBox = false;
+        FormBorderStyle = FormBorderStyle.FixedSingle;
+
+        _lblHdr = new Label();
+        _lblHdr.SetBounds(12, 10, 496, 20);
+        _lblHdr.Font = new Font(Font.FontFamily, 10, FontStyle.Bold);
+
+        _lblNames = new Label();
+        _lblNames.SetBounds(12, 34, 496, 20);
+
+        _txtLog = new TextBox();
+        _txtLog.SetBounds(12, 60, 496, 266);
+        _txtLog.Multiline = true;
+        _txtLog.ReadOnly = true;
+        _txtLog.ScrollBars = ScrollBars.Vertical;
+        _txtLog.BackColor = Color.White;
+
+        var btnReload = new Button();
+        btnReload.Text = "重新加载配置";
+        btnReload.SetBounds(12, 336, 120, 28);
+        btnReload.Click += delegate { LoadConfig(); };
+
+        var btnHide = new Button();
+        btnHide.Text = "隐藏到托盘";
+        btnHide.SetBounds(388, 336, 120, 28);
+        btnHide.Click += delegate { HideToTray(); };
+
+        Controls.Add(_lblHdr);
+        Controls.Add(_lblNames);
+        Controls.Add(_txtLog);
+        Controls.Add(btnReload);
+        Controls.Add(btnHide);
+
+        _iconOff = CreateIcon(false);
+        _iconOn = CreateIcon(true);
+        Icon = _iconOff;
+
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("显示窗口", null, delegate { ShowWindow(); });
+        menu.Items.Add("退出", null, delegate { ExitApp(); });
+        _tray = new NotifyIcon();
+        _tray.Text = "HDR Auto Switcher";
+        _tray.Icon = _iconOff;
+        _tray.ContextMenuStrip = menu;
+        _tray.Visible = true;
+        _tray.DoubleClick += delegate { ShowWindow(); };
+
+        _monitor.OnLog = Log;
+        _monitor.OnHdrStateChanged = OnHdrStateChanged;
+
+        string error;
+        if (!_monitor.InitDisplay(out error))
+        {
+            Log(error);
+        }
+        else if (!_monitor.Hdr.Supported)
+        {
+            Log("警告: 主显示器不支持 HDR，将仅监控进程而不切换 HDR。");
+        }
+        UpdateHdrLabel();
+
+        LoadConfig();
+
+        _timer = new System.Windows.Forms.Timer();
+        _timer.Interval = 1000;
+        _timer.Tick += delegate { _monitor.Tick(); UpdateHdrLabel(); };
+        _timer.Start();
+    }
+
+    private void LoadConfig()
+    {
+        string err = _monitor.LoadConfig();
+        if (err != null)
+        {
+            Log(err + "，请在 exe 同目录编辑 HDRAutoSwitcher.ini 后点击“重新加载配置”。");
+        }
+        else
+        {
+            Log("已加载配置，监控: " + string.Join(", ", _monitor.Names.ToArray()));
+        }
+        _lblNames.Text = "监控进程: " + (_monitor.Names.Count > 0 ? string.Join(", ", _monitor.Names.ToArray()) : "（未配置）");
+    }
+
+    private void Log(string msg)
+    {
+        string line = "[" + DateTime.Now.ToString("HH:mm:ss") + "] " + msg;
+        _txtLog.AppendText(line + Environment.NewLine);
+        if (_txtLog.Lines.Length > 500)
+        {
+            var lines = _txtLog.Lines;
+            var kept = new string[400];
+            Array.Copy(lines, lines.Length - 400, kept, 0, 400);
+            _txtLog.Lines = kept;
+        }
+    }
+
+    private void OnHdrStateChanged(bool hdrOn)
+    {
+        var icon = hdrOn ? _iconOn : _iconOff;
+        _tray.Icon = icon;
+        Icon = icon;
+        UpdateHdrLabel();
+    }
+
+    private void UpdateHdrLabel()
+    {
+        _lblHdr.Text = "主显示器 HDR: " + (_monitor.CurrentHdrEnabled ? "开" : "关")
+            + (_monitor.Hdr.Supported ? "" : "（显示器不支持 HDR）");
+        _lblHdr.ForeColor = _monitor.CurrentHdrEnabled ? Color.DarkOrange : Color.DimGray;
+    }
+
+    private void HideToTray()
+    {
+        Hide();
+        _tray.ShowBalloonTip(2000, "HDR Auto Switcher", "已隐藏到托盘，双击图标可重新打开窗口。", ToolTipIcon.Info);
+    }
+
+    private void ShowWindow()
+    {
+        Show();
+        WindowState = FormWindowState.Normal;
+        Activate();
+    }
+
+    private void ExitApp()
+    {
+        _reallyExit = true;
+        _monitor.RestoreHdr();
+        _tray.Visible = false;
+        Application.Exit();
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        if (WindowState == FormWindowState.Minimized)
+            HideToTray();
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (!_reallyExit)
+        {
+            e.Cancel = true; // 关闭按钮 = 最小化到托盘，通过托盘菜单“退出”结束程序
+            HideToTray();
+            return;
+        }
+        base.OnFormClosing(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _tray.Dispose();
+            _timer.Dispose();
+            if (_iconOn != null) { NativeMethods.DestroyIcon(_iconOn.Handle); _iconOn.Dispose(); }
+            if (_iconOff != null) { NativeMethods.DestroyIcon(_iconOff.Handle); _iconOff.Dispose(); }
+        }
+        base.Dispose(disposing);
+    }
+
+    private static Icon CreateIcon(bool hdrOn)
+    {
+        var bmp = new Bitmap(32, 32);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(hdrOn ? Color.DarkOrange : Color.DimGray);
+            using (var font = new Font("Arial", 11, FontStyle.Bold))
+                g.DrawString("HDR", font, Brushes.White, 1, 8);
+        }
+        Icon icon = Icon.FromHandle(bmp.GetHicon());
+        bmp.Dispose();
+        return icon;
+    }
+}
+
 class Program
 {
-    static volatile bool _hdrHeld;      // 当前是否处于"已记录并可能打开 HDR"状态
-    static bool _originalHdrEnabled;
-    static HdrController _hdr;
-
+    [STAThread]
     static int Main(string[] args)
     {
+        if (args.Length == 0)
+        {
+            // 无参数：图形界面模式
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new MainForm());
+            return 0;
+        }
+
+        // 有参数：控制台模式（输出附加到调用方终端）
+        NativeMethods.AttachConsole(0xFFFFFFFF);
+
         if (args.Length == 1 && args[0] == "--probe")
         {
             var h = new HdrController();
@@ -394,134 +735,52 @@ class Program
                 Console.WriteLine("切换失败: " + err2);
                 return 1;
             }
-            bool st;
-            if (h2.RefreshColorInfo(out st))
-                Console.WriteLine("当前 HDR 状态: " + (st ? "开" : "关"));
+            Console.WriteLine(on ? "HDR 已打开" : "HDR 已关闭");
             return 0;
         }
 
-        var rawNames = new List<string>(args);
-        if (rawNames.Count == 0)
+        if (args.Length == 1 && args[0] == "--status")
         {
-            // 无命令行参数时，从 exe 同目录的 HDRAutoSwitcher.ini 读取进程名
-            string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "HDRAutoSwitcher.ini");
-            if (!File.Exists(configPath))
+            var h3 = new HdrController();
+            bool st;
+            if (!h3.RefreshColorInfo(out st))
             {
-                Console.WriteLine("用法: HDRAutoSwitcher.exe <进程名1> [进程名2] ...");
-                Console.WriteLine("或在 exe 同目录创建 HDRAutoSwitcher.ini，每行一个进程名（# 或 ; 开头为注释）。");
-                Console.WriteLine("示例: HDRAutoSwitcher.exe game.exe \"Video Player.exe\"");
-                Console.WriteLine("监控指定进程: 任一启动后自动打开主显示器 HDR, 全部退出后恢复之前的 HDR 状态。");
+                Console.WriteLine("读取失败: " + h3.LastError);
                 return 1;
             }
-            foreach (var line in File.ReadAllLines(configPath))
-            {
-                var t = line.Trim();
-                if (t.Length > 0 && !t.StartsWith("#") && !t.StartsWith(";"))
-                    rawNames.Add(t);
-            }
-            if (rawNames.Count == 0)
-            {
-                Console.WriteLine("配置文件 " + configPath + " 中没有有效的进程名（每行一个，# 或 ; 开头为注释）。");
-                return 1;
-            }
-            Console.WriteLine("已从配置文件读取: " + configPath);
+            Console.WriteLine("当前 HDR 状态: " + (st ? "开" : "关"));
+            return 0;
         }
 
-        var names = new List<string>();
-        foreach (var a in rawNames)
+        // 命令行指定进程名的监控模式（输出到终端）
+        var monitor = new HdrMonitor();
+        monitor.OnLog = Console.WriteLine;
+        foreach (var a in args)
         {
             var n = a.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? a.Substring(0, a.Length - 4) : a;
-            if (n.Length > 0 && !names.Contains(n))
-                names.Add(n);
+            if (n.Length > 0 && !monitor.Names.Contains(n))
+                monitor.Names.Add(n);
         }
 
-        _hdr = new HdrController();
-        bool current;
-        if (!_hdr.RefreshColorInfo(out current))
+        string error;
+        if (!monitor.InitDisplay(out error))
         {
-            Console.WriteLine("无法读取主显示器状态: " + _hdr.LastError);
+            Console.WriteLine(error);
             return 1;
         }
-        if (!_hdr.Supported)
+        if (!monitor.Hdr.Supported)
             Console.WriteLine("警告: 主显示器不支持 HDR，将仅监控进程而不切换 HDR。");
-        Console.WriteLine("当前主显示器 HDR: " + (current ? "开" : "关"));
-        Console.WriteLine("正在监控: " + string.Join(", ", names.ToArray()));
+        Console.WriteLine("当前主显示器 HDR: " + (monitor.CurrentHdrEnabled ? "开" : "关"));
+        Console.WriteLine("正在监控: " + string.Join(", ", monitor.Names.ToArray()));
+        Console.WriteLine("（不带参数运行则为托盘图形界面；从 HDRAutoSwitcher.ini 读取进程名）");
 
-        Console.CancelKeyPress += OnExit;
-        AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+        Console.CancelKeyPress += delegate { Console.WriteLine("正在退出..."); monitor.RestoreHdr(); };
+        AppDomain.CurrentDomain.ProcessExit += delegate { monitor.RestoreHdr(); };
 
-        bool anyRunning = false;
         while (true)
         {
             Thread.Sleep(1000);
-            bool nowRunning = AnyProcessRunning(names);
-
-            if (nowRunning && !anyRunning)
-            {
-                bool enabled;
-                if (_hdr.Supported && _hdr.RefreshColorInfo(out enabled))
-                {
-                    _originalHdrEnabled = enabled;
-                    _hdrHeld = true;
-                    Console.WriteLine("检测到目标进程启动。原 HDR 状态: " + (enabled ? "开" : "关"));
-                    if (!enabled)
-                    {
-                        string error;
-                        if (_hdr.SetHdr(true, out error))
-                            Console.WriteLine("已打开主显示器 HDR。");
-                        else
-                            Console.WriteLine("打开 HDR 失败: " + error);
-                    }
-                    else
-                    {
-                        Console.WriteLine("HDR 已开启，保持不变。");
-                    }
-                }
-            }
-            else if (!nowRunning && anyRunning)
-            {
-                Console.WriteLine("目标进程已全部退出。");
-                RestoreHdr();
-            }
-            anyRunning = nowRunning;
+            monitor.Tick();
         }
-    }
-
-    static bool AnyProcessRunning(List<string> names)
-    {
-        foreach (var n in names)
-        {
-            if (Process.GetProcessesByName(n).Length > 0)
-                return true;
-        }
-        return false;
-    }
-
-    static void RestoreHdr()
-    {
-        if (!_hdrHeld || !_hdr.Supported)
-            return;
-        _hdrHeld = false;
-
-        bool enabled;
-        if (_hdr.RefreshColorInfo(out enabled) && enabled == _originalHdrEnabled)
-            return;
-
-        string error;
-        if (_hdr.SetHdr(_originalHdrEnabled, out error))
-            Console.WriteLine("已恢复 HDR 状态: " + (_originalHdrEnabled ? "开" : "关"));
-        else
-            Console.WriteLine("恢复 HDR 失败: " + error);
-    }
-
-    static void OnExit(object sender, ConsoleCancelEventArgs e)
-    {
-        Console.WriteLine("正在退出...");
-        RestoreHdr();
-    }
-
-    static void OnProcessExit(object sender, EventArgs e)
-    {
-        RestoreHdr();
     }
 }

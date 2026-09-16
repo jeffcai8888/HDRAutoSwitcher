@@ -15,10 +15,10 @@
 ### 界面与托盘
 
 - 双击 `HDRAutoSwitcher.exe` 启动，主窗口显示 HDR 状态、监控的进程列表和运行日志
+- 在主窗口中可直接修改配置：点"添加 exe..."通过文件对话框选择要监控的程序（可多选），"删除选中"移除，"保存配置"写回 `HDRAutoSwitcher.ini` 并立即生效，无需重启
 - 点关闭按钮或最小化都会隐藏到右下角托盘（通知区域），双击托盘图标重新打开窗口
 - 托盘图标颜色表示状态：灰色 = HDR 关，橙色 = HDR 开；HDR 切换时弹出气泡通知
 - 托盘右键菜单：显示窗口 / 退出（退出时恢复 HDR 状态）
-- 修改 `HDRAutoSwitcher.ini` 后在主窗口点"重新加载配置"即可生效，无需重启
 
 ### 环境要求
 
@@ -70,10 +70,10 @@ A Windows tray utility that watches specific processes and automatically toggles
 ### UI & System Tray
 
 - Double-click `HDRAutoSwitcher.exe` to start; the main window shows the HDR state, the watched process list, and a running log
+- Configuration can be edited right in the main window: "添加 exe..." opens a file picker to select programs to watch (multi-select supported), "删除选中" removes the selected entry, and "保存配置" writes everything back to `HDRAutoSwitcher.ini` and applies it immediately — no restart needed
 - Closing or minimizing the window hides it to the system tray (notification area); double-click the tray icon to reopen
 - Tray icon color indicates state: gray = HDR off, orange = HDR on; a balloon notification appears on every toggle
 - Tray context menu: Show window / Exit (HDR state is restored on exit)
-- After editing `HDRAutoSwitcher.ini`, click "重新加载配置" (Reload config) in the main window — no restart needed
 
 ### Requirements
 

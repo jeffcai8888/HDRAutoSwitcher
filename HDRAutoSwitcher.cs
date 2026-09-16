@@ -383,6 +383,25 @@ class HdrMonitor
         return null;
     }
 
+    // 保存当前 Names 到配置文件，保留原有注释行
+    public void SaveConfig()
+    {
+        var lines = new List<string>();
+        if (File.Exists(ConfigPath))
+        {
+            foreach (var line in File.ReadAllLines(ConfigPath))
+            {
+                var t = line.Trim();
+                if (t.StartsWith("#") || t.StartsWith(";"))
+                    lines.Add(line);
+            }
+        }
+        if (lines.Count > 0)
+            lines.Add("");
+        lines.AddRange(Names);
+        File.WriteAllLines(ConfigPath, lines.ToArray());
+    }
+
     public bool InitDisplay(out string error)
     {
         error = null;
@@ -486,8 +505,8 @@ class MainForm : Form
     private readonly HdrMonitor _monitor = new HdrMonitor();
     private readonly System.Windows.Forms.Timer _timer;
     private readonly NotifyIcon _tray;
-    private readonly Label _lblNames;
     private readonly Label _lblHdr;
+    private readonly ListBox _lstNames;
     private readonly TextBox _txtLog;
     private Icon _iconOn;
     private Icon _iconOff;
@@ -496,40 +515,58 @@ class MainForm : Form
     public MainForm()
     {
         Text = "HDR Auto Switcher";
-        ClientSize = new Size(520, 380);
+        ClientSize = new Size(560, 500);
         StartPosition = FormStartPosition.CenterScreen;
         MinimizeBox = true;
         MaximizeBox = false;
         FormBorderStyle = FormBorderStyle.FixedSingle;
 
         _lblHdr = new Label();
-        _lblHdr.SetBounds(12, 10, 496, 20);
+        _lblHdr.SetBounds(12, 10, 536, 20);
         _lblHdr.Font = new Font(Font.FontFamily, 10, FontStyle.Bold);
 
-        _lblNames = new Label();
-        _lblNames.SetBounds(12, 34, 496, 20);
+        var grpConfig = new GroupBox();
+        grpConfig.Text = "监控的进程";
+        grpConfig.SetBounds(12, 36, 536, 158);
+
+        _lstNames = new ListBox();
+        _lstNames.SetBounds(10, 20, 380, 128);
+
+        var btnAdd = new Button();
+        btnAdd.Text = "添加 exe...";
+        btnAdd.SetBounds(400, 20, 126, 34);
+        btnAdd.Click += delegate { AddExe(); };
+
+        var btnRemove = new Button();
+        btnRemove.Text = "删除选中";
+        btnRemove.SetBounds(400, 62, 126, 34);
+        btnRemove.Click += delegate { RemoveSelected(); };
+
+        var btnSave = new Button();
+        btnSave.Text = "保存配置";
+        btnSave.SetBounds(400, 104, 126, 44);
+        btnSave.Click += delegate { SaveConfig(); };
+
+        grpConfig.Controls.Add(_lstNames);
+        grpConfig.Controls.Add(btnAdd);
+        grpConfig.Controls.Add(btnRemove);
+        grpConfig.Controls.Add(btnSave);
 
         _txtLog = new TextBox();
-        _txtLog.SetBounds(12, 60, 496, 266);
+        _txtLog.SetBounds(12, 204, 536, 246);
         _txtLog.Multiline = true;
         _txtLog.ReadOnly = true;
         _txtLog.ScrollBars = ScrollBars.Vertical;
         _txtLog.BackColor = Color.White;
 
-        var btnReload = new Button();
-        btnReload.Text = "重新加载配置";
-        btnReload.SetBounds(12, 336, 120, 28);
-        btnReload.Click += delegate { LoadConfig(); };
-
         var btnHide = new Button();
         btnHide.Text = "隐藏到托盘";
-        btnHide.SetBounds(388, 336, 120, 28);
+        btnHide.SetBounds(428, 460, 120, 30);
         btnHide.Click += delegate { HideToTray(); };
 
         Controls.Add(_lblHdr);
-        Controls.Add(_lblNames);
+        Controls.Add(grpConfig);
         Controls.Add(_txtLog);
-        Controls.Add(btnReload);
         Controls.Add(btnHide);
 
         _iconOff = CreateIcon(false);
@@ -573,13 +610,69 @@ class MainForm : Form
         string err = _monitor.LoadConfig();
         if (err != null)
         {
-            Log(err + "，请在 exe 同目录编辑 HDRAutoSwitcher.ini 后点击“重新加载配置”。");
+            Log(err + "，请点击“添加 exe...”选择要监控的程序，然后保存配置。");
         }
         else
         {
             Log("已加载配置，监控: " + string.Join(", ", _monitor.Names.ToArray()));
         }
-        _lblNames.Text = "监控进程: " + (_monitor.Names.Count > 0 ? string.Join(", ", _monitor.Names.ToArray()) : "（未配置）");
+        RefreshNameList();
+    }
+
+    private void RefreshNameList()
+    {
+        _lstNames.Items.Clear();
+        foreach (var n in _monitor.Names)
+            _lstNames.Items.Add(n);
+    }
+
+    private void AddExe()
+    {
+        using (var dlg = new OpenFileDialog())
+        {
+            dlg.Title = "选择要监控的程序（可多选）";
+            dlg.Filter = "可执行文件 (*.exe)|*.exe|所有文件 (*.*)|*.*";
+            dlg.Multiselect = true;
+            if (dlg.ShowDialog(this) != DialogResult.OK)
+                return;
+            int added = 0;
+            foreach (var file in dlg.FileNames)
+            {
+                var name = Path.GetFileNameWithoutExtension(file);
+                if (name.Length > 0 && !_monitor.Names.Contains(name))
+                {
+                    _monitor.Names.Add(name);
+                    added++;
+                }
+            }
+            RefreshNameList();
+            if (added > 0)
+                Log("已添加 " + added + " 个进程（尚未保存，点击“保存配置”生效）。");
+        }
+    }
+
+    private void RemoveSelected()
+    {
+        if (_lstNames.SelectedItem == null)
+            return;
+        var name = (string)_lstNames.SelectedItem;
+        _monitor.Names.Remove(name);
+        RefreshNameList();
+        Log("已移除 " + name + "（尚未保存，点击“保存配置”生效）。");
+    }
+
+    private void SaveConfig()
+    {
+        try
+        {
+            _monitor.SaveConfig();
+            LoadConfig();
+            Log("配置已保存到 " + HdrMonitor.ConfigPath + " 并立即生效。");
+        }
+        catch (Exception ex)
+        {
+            Log("保存配置失败: " + ex.Message);
+        }
     }
 
     private void Log(string msg)

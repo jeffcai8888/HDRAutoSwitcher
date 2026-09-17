@@ -354,14 +354,43 @@ class HdrMonitor
 
     public static string ConfigPath
     {
-        get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "HDRAutoSwitcher.ini"); }
+        get
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "HDRAutoSwitcher", "HDRAutoSwitcher.ini");
+        }
+    }
+
+    private const string ConfigTemplate =
+        "# HDRAutoSwitcher 配置文件\r\n" +
+        "# 每行一个要监控的进程名（.exe 后缀可写可不写），# 或 ; 开头的行是注释。\r\n" +
+        "# 任一进程启动后自动打开主显示器 HDR，全部退出后恢复之前的 HDR 状态。\r\n" +
+        "# 也可以在主窗口中通过“添加 exe...”选择程序，点“保存配置”后立即生效。\r\n" +
+        "\r\n" +
+        "# 示例：\r\n" +
+        "# game.exe\r\n" +
+        "# Video Player.exe\r\n";
+
+    // 确保配置文件存在：不存在则新建；兼容旧版本 exe 同目录的 ini，存在则迁移
+    public static void EnsureConfigExists()
+    {
+        if (File.Exists(ConfigPath))
+            return;
+        Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath));
+        string legacy = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "HDRAutoSwitcher.ini");
+        if (File.Exists(legacy))
+        {
+            File.Copy(legacy, ConfigPath);
+            return;
+        }
+        File.WriteAllText(ConfigPath, ConfigTemplate);
     }
 
     // 返回 null 表示成功，否则为错误消息
     public string LoadConfig()
     {
-        if (!File.Exists(ConfigPath))
-            return "找不到配置文件 " + ConfigPath;
+        EnsureConfigExists();
 
         var loaded = new List<string>();
         foreach (var line in File.ReadAllLines(ConfigPath))
@@ -559,6 +588,11 @@ class MainForm : Form
         _txtLog.ScrollBars = ScrollBars.Vertical;
         _txtLog.BackColor = Color.White;
 
+        var btnOpenConfig = new Button();
+        btnOpenConfig.Text = "打开配置文件";
+        btnOpenConfig.SetBounds(12, 460, 130, 30);
+        btnOpenConfig.Click += delegate { OpenConfigFile(); };
+
         var btnHide = new Button();
         btnHide.Text = "隐藏到托盘";
         btnHide.SetBounds(428, 460, 120, 30);
@@ -567,6 +601,7 @@ class MainForm : Form
         Controls.Add(_lblHdr);
         Controls.Add(grpConfig);
         Controls.Add(_txtLog);
+        Controls.Add(btnOpenConfig);
         Controls.Add(btnHide);
 
         _iconOff = CreateIcon(false);
@@ -659,6 +694,20 @@ class MainForm : Form
         _monitor.Names.Remove(name);
         RefreshNameList();
         Log("已移除 " + name + "（尚未保存，点击“保存配置”生效）。");
+    }
+
+    private void OpenConfigFile()
+    {
+        try
+        {
+            HdrMonitor.EnsureConfigExists();
+            // 打开所在目录并选中 ini 文件
+            Process.Start("explorer.exe", "/select,\"" + HdrMonitor.ConfigPath + "\"");
+        }
+        catch (Exception ex)
+        {
+            Log("打开配置文件失败: " + ex.Message);
+        }
     }
 
     private void SaveConfig()

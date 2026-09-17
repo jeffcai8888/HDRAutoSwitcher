@@ -28,7 +28,7 @@
 
 ### 配置
 
-编辑 exe 同目录下的 `HDRAutoSwitcher.ini`，每行写一个要监控的进程名（`.exe` 后缀可写可不写），`#` 或 `;` 开头的行为注释：
+配置文件位于 `%APPDATA%\HDRAutoSwitcher\HDRAutoSwitcher.ini`，首次启动时自动创建（如果 exe 同目录有旧版 ini 会自动迁移）。推荐直接在主窗口中编辑：点"添加 exe..."通过文件对话框选择要监控的程序（可多选），"删除选中"移除，"保存配置"立即生效；点"打开配置文件"可在资源管理器中定位 ini 手动编辑，格式为每行一个进程名（`.exe` 后缀可写可不写），`#` 或 `;` 开头的行为注释：
 
 ```ini
 game.exe
@@ -83,7 +83,7 @@ A Windows tray utility that watches specific processes and automatically toggles
 
 ### Configuration
 
-Edit `HDRAutoSwitcher.ini` next to the exe — one process name per line (the `.exe` suffix is optional); lines starting with `#` or `;` are comments:
+The config file lives at `%APPDATA%\HDRAutoSwitcher\HDRAutoSwitcher.ini` and is created automatically on first launch (a legacy ini next to the exe is migrated automatically). The easiest way to edit it is in the main window: "添加 exe..." opens a file picker (multi-select supported), "删除选中" removes the selected entry, and "保存配置" saves and applies immediately. "打开配置文件" opens Explorer with the ini selected for manual editing — one process name per line (the `.exe` suffix is optional); lines starting with `#` or `;` are comments:
 
 ```ini
 game.exe

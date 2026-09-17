@@ -7,6 +7,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 static class NativeMethods
 {
@@ -242,6 +243,8 @@ static class Lang
         { "LOG_ALL_EXITED", new[]{ "目标进程已全部退出。", "目標處理程序已全部結束。", "All watched processes have exited.", "対象プロセスがすべて終了しました。", "Tous les processus surveillés sont terminés.", "Todos los procesos vigilados han finalizado.", "Todos os processos monitorizados terminaram.", "Alle überwachten Prozesse wurden beendet." } },
         { "LOG_RESTORED", new[]{ "已恢复 HDR 状态: {0}", "已恢復 HDR 狀態: {0}", "HDR state restored: {0}", "HDR 状態を復元しました: {0}", "État HDR restauré : {0}", "Estado HDR restaurado: {0}", "Estado HDR restaurado: {0}", "HDR-Status wiederhergestellt: {0}" } },
         { "LOG_RESTORE_FAIL", new[]{ "恢复 HDR 失败: {0}", "恢復 HDR 失敗: {0}", "Failed to restore HDR: {0}", "HDR の復元に失敗: {0}", "Échec de la restauration du HDR : {0}", "Error al restaurar HDR: {0}", "Falha ao restaurar HDR: {0}", "HDR-Wiederherstellung fehlgeschlagen: {0}" } },
+        { "CHK_AUTOSTART", new[]{ "开机自动启动", "開機自動啟動", "Start with Windows", "Windows 起動時に開始", "Démarrer avec Windows", "Iniciar con Windows", "Iniciar com o Windows", "Mit Windows starten" } },
+        { "LOG_AUTOSTART_FAIL", new[]{ "设置开机自启动失败: {0}", "設定開機自動啟動失敗: {0}", "Failed to change auto-start setting: {0}", "自動起動の設定に失敗: {0}", "Échec du réglage du démarrage automatique : {0}", "Error al cambiar el inicio automático: {0}", "Falha ao alterar o arranque automático: {0}", "Autostart-Einstellung fehlgeschlagen: {0}" } },
     };
 
     public static string T(string key)
@@ -319,6 +322,32 @@ static class Lang
             case "pt": return "pt";
             case "de": return "de";
             default: return Default; // 不在支持范围内显示英语
+        }
+    }
+}
+
+// 开机自动启动：HKCU Run 键，无需管理员权限
+static class AutoStart
+{
+    const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    const string ValueName = "HDRAutoSwitcher";
+
+    public static bool IsEnabled()
+    {
+        using (var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, false))
+            return key != null && key.GetValue(ValueName) != null;
+    }
+
+    public static void Set(bool enable)
+    {
+        using (var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, true))
+        {
+            if (key == null)
+                throw new InvalidOperationException("无法打开注册表 Run 键");
+            if (enable)
+                key.SetValue(ValueName, "\"" + Application.ExecutablePath + "\" --tray");
+            else
+                key.DeleteValue(ValueName, false);
         }
     }
 }
@@ -683,16 +712,19 @@ class MainForm : Form
     private readonly Button _btnSave;
     private readonly Button _btnOpenConfig;
     private readonly Button _btnHide;
+    private readonly CheckBox _chkAutoStart;
     private readonly ToolStripMenuItem _menuLang;
     private readonly ToolStripMenuItem _trayShow;
     private readonly ToolStripMenuItem _trayExit;
     private readonly TextBox _txtLog;
+    private readonly bool _startHidden;
     private Icon _iconOn;
     private Icon _iconOff;
     private bool _reallyExit;
 
-    public MainForm()
+    public MainForm(bool startHidden)
     {
+        _startHidden = startHidden;
         Lang.Init();
 
         Text = "HDR Auto Switcher";
@@ -756,13 +788,19 @@ class MainForm : Form
 
         _btnHide = new Button();
         _btnHide.SetBounds(398, 484, 150, 30);
-        _btnHide.Click += delegate { HideToTray(); };
+        _btnHide.Click += delegate { HideToTray(false); };
+
+        _chkAutoStart = new CheckBox();
+        _chkAutoStart.SetBounds(174, 488, 214, 24);
+        _chkAutoStart.Checked = AutoStart.IsEnabled();
+        _chkAutoStart.CheckedChanged += AutoStartChanged;
 
         Controls.Add(_lblHdr);
         Controls.Add(_grpConfig);
         Controls.Add(_txtLog);
         Controls.Add(_btnOpenConfig);
         Controls.Add(_btnHide);
+        Controls.Add(_chkAutoStart);
 
         _iconOff = CreateIcon(false);
         _iconOn = CreateIcon(true);
@@ -823,7 +861,33 @@ class MainForm : Form
         _btnHide.Text = Lang.T("BTN_HIDE");
         _trayShow.Text = Lang.T("TRAY_SHOW");
         _trayExit.Text = Lang.T("TRAY_EXIT");
+        _chkAutoStart.Text = Lang.T("CHK_AUTOSTART");
         UpdateHdrLabel();
+    }
+
+    private bool _allowVisible;
+
+    // 开机自启动（--tray）时抑制首次显示，直接进入托盘
+    protected override void SetVisibleCore(bool value)
+    {
+        if (_startHidden && !_allowVisible)
+            value = false;
+        base.SetVisibleCore(value);
+    }
+
+    private void AutoStartChanged(object sender, EventArgs e)
+    {
+        try
+        {
+            AutoStart.Set(_chkAutoStart.Checked);
+        }
+        catch (Exception ex)
+        {
+            Log(Lang.T("LOG_AUTOSTART_FAIL", ex.Message));
+            _chkAutoStart.CheckedChanged -= AutoStartChanged;
+            _chkAutoStart.Checked = AutoStart.IsEnabled();
+            _chkAutoStart.CheckedChanged += AutoStartChanged;
+        }
     }
 
     private void LoadConfig()
@@ -938,14 +1002,16 @@ class MainForm : Form
         _lblHdr.ForeColor = _monitor.CurrentHdrEnabled ? Color.DarkOrange : Color.DimGray;
     }
 
-    private void HideToTray()
+    private void HideToTray(bool silent)
     {
         Hide();
-        _tray.ShowBalloonTip(2000, "HDR Auto Switcher", Lang.T("BALLOON_HIDE"), ToolTipIcon.Info);
+        if (!silent)
+            _tray.ShowBalloonTip(2000, "HDR Auto Switcher", Lang.T("BALLOON_HIDE"), ToolTipIcon.Info);
     }
 
     private void ShowWindow()
     {
+        _allowVisible = true;
         Show();
         WindowState = FormWindowState.Normal;
         Activate();
@@ -963,7 +1029,7 @@ class MainForm : Form
     {
         base.OnResize(e);
         if (WindowState == FormWindowState.Minimized)
-            HideToTray();
+            HideToTray(false);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
@@ -971,7 +1037,7 @@ class MainForm : Form
         if (!_reallyExit)
         {
             e.Cancel = true; // 关闭按钮 = 最小化到托盘，通过托盘菜单“退出”结束程序
-            HideToTray();
+            HideToTray(false);
             return;
         }
         base.OnFormClosing(e);
@@ -1009,12 +1075,12 @@ class Program
     [STAThread]
     static int Main(string[] args)
     {
-        if (args.Length == 0)
+        if (args.Length == 0 || (args.Length == 1 && args[0] == "--tray"))
         {
-            // 无参数：图形界面模式
+            // 图形界面模式；--tray 时启动后直接进入托盘（开机自启动用）
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new MainForm());
+            Application.Run(new MainForm(args.Length == 1));
             return 0;
         }
 

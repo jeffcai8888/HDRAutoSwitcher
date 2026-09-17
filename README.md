@@ -20,6 +20,7 @@
 - 托盘图标颜色表示状态：灰色 = HDR 关，橙色 = HDR 开；HDR 切换时弹出气泡通知
 - 托盘右键菜单：显示窗口 / 退出（退出时恢复 HDR 状态）
 - 多语言界面：简体中文、繁體中文、English、日本語、Français、Español、Português、Deutsch；首次启动跟随系统语言（不支持的语言回退到英语），通过顶部"语言"菜单切换并自动记住选择
+- 可勾选"开机自动启动"（默认关闭，写入 HKCU 注册表 Run 键，无需管理员权限）；自启动时静默进入托盘，不弹出窗口
 
 ### 环境要求
 
@@ -76,6 +77,7 @@ A Windows tray utility that watches specific processes and automatically toggles
 - Tray icon color indicates state: gray = HDR off, orange = HDR on; a balloon notification appears on every toggle
 - Tray context menu: Show window / Exit (HDR state is restored on exit)
 - Multilingual UI: 简体中文, 繁體中文, English, 日本語, Français, Español, Português, Deutsch; follows the system language on first launch (falls back to English for unsupported languages) — switch anytime via the Language menu, the choice is remembered
+- Optional "Start with Windows" checkbox (off by default; uses the HKCU Run registry key, no admin rights needed); auto-started instances go straight to the tray without showing a window
 
 ### Requirements
 

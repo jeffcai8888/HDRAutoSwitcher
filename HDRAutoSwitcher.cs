@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -180,6 +181,146 @@ static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern bool DestroyIcon(IntPtr handle);
+}
+
+// 多语言字符串表。支持: 简体中文, 繁體中文, English, 日本語, Français, Español, Português, Deutsch
+static class Lang
+{
+    public const string Default = "en";
+    public static string Current = Default;
+
+    public static readonly string[] Codes = { "zh-CN", "zh-TW", "en", "ja", "fr", "es", "pt", "de" };
+
+    public static string DisplayName(string code)
+    {
+        switch (code)
+        {
+            case "zh-CN": return "简体中文";
+            case "zh-TW": return "繁體中文";
+            case "ja": return "日本語";
+            case "fr": return "Français";
+            case "es": return "Español";
+            case "pt": return "Português";
+            case "de": return "Deutsch";
+            default: return "English";
+        }
+    }
+
+    // 数组顺序与 Codes 一致: zh-CN, zh-TW, en, ja, fr, es, pt, de
+    static readonly Dictionary<string, string[]> Table = new Dictionary<string, string[]>
+    {
+        { "ON", new[]{ "开", "開", "On", "オン", "Activé", "Activado", "Ativado", "Ein" } },
+        { "OFF", new[]{ "关", "關", "Off", "オフ", "Désactivé", "Desactivado", "Desativado", "Aus" } },
+        { "HDR_STATUS", new[]{ "主显示器 HDR: {0}", "主顯示器 HDR: {0}", "Primary display HDR: {0}", "メインディスプレイ HDR: {0}", "HDR de l'écran principal : {0}", "HDR de la pantalla principal: {0}", "HDR do monitor principal: {0}", "HDR des Hauptbildschirms: {0}" } },
+        { "HDR_UNSUPPORTED_SUFFIX", new[]{ "（显示器不支持 HDR）", "（顯示器不支援 HDR）", " (HDR not supported)", "（HDR 非対応）", " (HDR non pris en charge)", " (HDR no compatible)", " (HDR não suportado)", " (HDR nicht unterstützt)" } },
+        { "GRP_PROCESSES", new[]{ "监控的进程", "監控的處理程序", "Watched processes", "監視するプロセス", "Processus surveillés", "Procesos vigilados", "Processos monitorizados", "Überwachte Prozesse" } },
+        { "BTN_ADD", new[]{ "添加 exe...", "新增 exe...", "Add exe...", "exe を追加...", "Ajouter un exe...", "Añadir exe...", "Adicionar exe...", "exe hinzufügen..." } },
+        { "BTN_REMOVE", new[]{ "删除选中", "刪除選取", "Remove selected", "選択を削除", "Supprimer la sélection", "Eliminar selección", "Remover selecionado", "Auswahl entfernen" } },
+        { "BTN_SAVE", new[]{ "保存配置", "儲存設定", "Save config", "設定を保存", "Enregistrer", "Guardar config.", "Guardar configuração", "Speichern" } },
+        { "BTN_OPEN_CONFIG", new[]{ "打开配置文件", "開啟設定檔", "Open config file", "設定ファイルを開く", "Ouvrir la config", "Abrir configuración", "Abrir configuração", "Konfiguration öffnen" } },
+        { "BTN_HIDE", new[]{ "隐藏到托盘", "隱藏到系統匣", "Hide to tray", "トレイに最小化", "Réduire dans la zone de notification", "Ocultar a la bandeja", "Ocultar para a bandeja", "In Infobereich minimieren" } },
+        { "MENU_LANG", new[]{ "语言", "語言", "Language", "言語", "Langue", "Idioma", "Idioma", "Sprache" } },
+        { "TRAY_SHOW", new[]{ "显示窗口", "顯示視窗", "Show window", "ウィンドウを表示", "Afficher la fenêtre", "Mostrar ventana", "Mostrar janela", "Fenster anzeigen" } },
+        { "TRAY_EXIT", new[]{ "退出", "結束", "Exit", "終了", "Quitter", "Salir", "Sair", "Beenden" } },
+        { "BALLOON_HIDE", new[]{ "已隐藏到托盘，双击图标可重新打开窗口。", "已隱藏到系統匣，雙擊圖示可重新開啟視窗。", "Minimized to tray. Double-click the icon to reopen the window.", "トレイに最小化しました。アイコンのダブルクリックで再表示します。", "Réduit dans la zone de notification. Double-cliquez sur l'icône pour rouvrir.", "Oculto a la bandeja. Doble clic en el icono para reabrir.", "Oculto na bandeja. Clique duas vezes no ícone para reabrir.", "In den Infobereich minimiert. Doppelklick auf das Symbol zum erneuten Öffnen." } },
+        { "DLG_ADD_TITLE", new[]{ "选择要监控的程序（可多选）", "選擇要監控的程式（可多選）", "Select programs to watch (multi-select)", "監視するプログラムを選択（複数選択可）", "Sélectionnez les programmes à surveiller (multi-sélection)", "Selecciona los programas a vigilar (selección múltiple)", "Selecione os programas a monitorizar (seleção múltipla)", "Programme zum Überwachen auswählen (Mehrfachauswahl)" } },
+        { "DLG_ADD_FILTER", new[]{ "可执行文件 (*.exe)|*.exe|所有文件 (*.*)|*.*", "執行檔 (*.exe)|*.exe|所有檔案 (*.*)|*.*", "Executable (*.exe)|*.exe|All files (*.*)|*.*", "実行ファイル (*.exe)|*.exe|すべてのファイル (*.*)|*.*", "Exécutable (*.exe)|*.exe|Tous les fichiers (*.*)|*.*", "Ejecutable (*.exe)|*.exe|Todos los archivos (*.*)|*.*", "Executável (*.exe)|*.exe|Todos os ficheiros (*.*)|*.*", "Ausführbare Datei (*.exe)|*.exe|Alle Dateien (*.*)|*.*" } },
+        { "LOG_LOADED", new[]{ "已加载配置，监控: {0}", "已載入設定，監控: {0}", "Config loaded, watching: {0}", "設定を読み込みました。監視中: {0}", "Config chargée, surveillance : {0}", "Configuración cargada, vigilando: {0}", "Configuração carregada, monitorizando: {0}", "Konfiguration geladen, überwacht: {0}" } },
+        { "LOG_NO_NAMES", new[]{ "配置文件中没有有效的进程名（每行一个，# 或 ; 开头为注释）", "設定檔中沒有有效的處理程序名稱（每行一個，# 或 ; 開頭為註解）", "No valid process names in the config file (one per line; # or ; starts a comment)", "設定ファイルに有効なプロセス名がありません（1 行に 1 つ。# または ; で始まる行はコメント）", "Aucun nom de processus valide dans le fichier de config (un par ligne ; # ou ; pour les commentaires)", "No hay nombres de proceso válidos en el archivo (uno por línea; # o ; para comentarios)", "Nenhum nome de processo válido no ficheiro (um por linha; # ou ; para comentários)", "Keine gültigen Prozessnamen in der Konfigurationsdatei (einer pro Zeile; # oder ; für Kommentare)" } },
+        { "LOG_NO_NAMES_HINT", new[]{ "请点击“添加 exe...”选择要监控的程序，然后保存配置。", "請點擊「新增 exe...」選擇要監控的程式，然後儲存設定。", "Click \"Add exe...\" to choose programs to watch, then save the config.", "「exe を追加...」で監視するプログラムを選び、設定を保存してください。", "Cliquez sur \"Ajouter un exe...\" pour choisir les programmes, puis enregistrez.", "Haz clic en \"Añadir exe...\" para elegir los programas y luego guarda.", "Clique em \"Adicionar exe...\" para escolher os programas e depois guarde.", "Klicken Sie auf „exe hinzufügen...“, um Programme auszuwählen, und speichern Sie." } },
+        { "LOG_ADDED", new[]{ "已添加 {0} 个进程（尚未保存，点击“保存配置”生效）。", "已新增 {0} 個處理程序（尚未儲存，點擊「儲存設定」生效）。", "Added {0} process(es) (not saved yet — click \"Save config\").", "{0} 個のプロセスを追加しました（未保存。「設定を保存」をクリック）。", "{0} processus ajouté(s) (non enregistré — cliquez sur \"Enregistrer\").", "Se añadieron {0} proceso(s) (sin guardar — haz clic en \"Guardar\").", "{0} processo(s) adicionado(s) (ainda não guardado — clique em \"Guardar\").", "{0} Prozess(e) hinzugefügt (noch nicht gespeichert — „Speichern“ klicken)." } },
+        { "LOG_REMOVED", new[]{ "已移除 {0}（尚未保存，点击“保存配置”生效）。", "已移除 {0}（尚未儲存，點擊「儲存設定」生效）。", "Removed {0} (not saved yet — click \"Save config\").", "{0} を削除しました（未保存。「設定を保存」をクリック）。", "{0} supprimé (non enregistré — cliquez sur \"Enregistrer\").", "{0} eliminado (sin guardar — haz clic en \"Guardar\").", "{0} removido (ainda não guardado — clique em \"Guardar\").", "{0} entfernt (noch nicht gespeichert — „Speichern“ klicken)." } },
+        { "LOG_SAVED", new[]{ "配置已保存到 {0} 并立即生效。", "設定已儲存到 {0} 並立即生效。", "Config saved to {0} and applied immediately.", "設定を {0} に保存し、ただちに適用しました。", "Config enregistrée dans {0} et appliquée immédiatement.", "Configuración guardada en {0} y aplicada de inmediato.", "Configuração guardada em {0} e aplicada de imediato.", "Konfiguration nach {0} gespeichert und sofort angewendet." } },
+        { "LOG_SAVE_FAIL", new[]{ "保存配置失败: {0}", "儲存設定失敗: {0}", "Failed to save config: {0}", "設定の保存に失敗: {0}", "Échec de l'enregistrement : {0}", "Error al guardar la configuración: {0}", "Falha ao guardar a configuração: {0}", "Speichern der Konfiguration fehlgeschlagen: {0}" } },
+        { "LOG_OPEN_FAIL", new[]{ "打开配置文件失败: {0}", "開啟設定檔失敗: {0}", "Failed to open config file: {0}", "設定ファイルを開けませんでした: {0}", "Impossible d'ouvrir le fichier : {0}", "Error al abrir el archivo: {0}", "Falha ao abrir o ficheiro: {0}", "Konfigurationsdatei konnte nicht geöffnet werden: {0}" } },
+        { "WARN_UNSUPPORTED", new[]{ "警告: 主显示器不支持 HDR，将仅监控进程而不切换 HDR。", "警告: 主顯示器不支援 HDR，僅監控處理程序，不切換 HDR。", "Warning: the primary display does not support HDR; processes will be watched without toggling HDR.", "警告: メインディスプレイは HDR 非対応です。プロセスの監視のみ行い、HDR は切り替えません。", "Avertissement : l'écran principal ne prend pas en charge le HDR ; surveillance sans bascule HDR.", "Aviso: la pantalla principal no admite HDR; solo se vigilarán los procesos sin cambiar HDR.", "Aviso: o monitor principal não suporta HDR; apenas os processos serão monitorizados.", "Warnung: Der Hauptbildschirm unterstützt kein HDR; Prozesse werden nur überwacht." } },
+        { "LOG_DISPLAY_FAIL", new[]{ "无法读取主显示器状态: {0}", "無法讀取主顯示器狀態: {0}", "Cannot read primary display state: {0}", "メインディスプレイの状態を読み取れません: {0}", "Impossible de lire l'état de l'écran principal : {0}", "No se puede leer el estado de la pantalla: {0}", "Não é possível ler o estado do monitor: {0}", "Status des Hauptbildschirms nicht lesbar: {0}" } },
+        { "LOG_DETECTED", new[]{ "检测到目标进程启动。原 HDR 状态: {0}", "偵測到目標處理程序啟動。原 HDR 狀態: {0}", "Watched process started. Previous HDR state: {0}", "対象プロセスの起動を検出しました。元の HDR 状態: {0}", "Processus surveillé démarré. État HDR précédent : {0}", "Proceso vigilado iniciado. Estado HDR anterior: {0}", "Processo monitorizado iniciado. Estado HDR anterior: {0}", "Überwachter Prozess gestartet. Vorheriger HDR-Status: {0}" } },
+        { "LOG_HDR_ON", new[]{ "已打开主显示器 HDR。", "已開啟主顯示器 HDR。", "HDR enabled on the primary display.", "メインディスプレイの HDR をオンにしました。", "HDR activé sur l'écran principal.", "HDR activado en la pantalla principal.", "HDR ativado no monitor principal.", "HDR auf dem Hauptbildschirm aktiviert." } },
+        { "LOG_HDR_ON_FAIL", new[]{ "打开 HDR 失败: {0}", "開啟 HDR 失敗: {0}", "Failed to enable HDR: {0}", "HDR の有効化に失敗: {0}", "Échec de l'activation du HDR : {0}", "Error al activar HDR: {0}", "Falha ao ativar HDR: {0}", "HDR-Aktivierung fehlgeschlagen: {0}" } },
+        { "LOG_HDR_KEPT", new[]{ "HDR 已开启，保持不变。", "HDR 已開啟，保持不變。", "HDR already on; left unchanged.", "HDR はすでにオンです。変更しません。", "HDR déjà activé ; inchangé.", "HDR ya estaba activado; sin cambios.", "HDR já estava ativado; sem alterações.", "HDR bereits aktiv; unverändert." } },
+        { "LOG_ALL_EXITED", new[]{ "目标进程已全部退出。", "目標處理程序已全部結束。", "All watched processes have exited.", "対象プロセスがすべて終了しました。", "Tous les processus surveillés sont terminés.", "Todos los procesos vigilados han finalizado.", "Todos os processos monitorizados terminaram.", "Alle überwachten Prozesse wurden beendet." } },
+        { "LOG_RESTORED", new[]{ "已恢复 HDR 状态: {0}", "已恢復 HDR 狀態: {0}", "HDR state restored: {0}", "HDR 状態を復元しました: {0}", "État HDR restauré : {0}", "Estado HDR restaurado: {0}", "Estado HDR restaurado: {0}", "HDR-Status wiederhergestellt: {0}" } },
+        { "LOG_RESTORE_FAIL", new[]{ "恢复 HDR 失败: {0}", "恢復 HDR 失敗: {0}", "Failed to restore HDR: {0}", "HDR の復元に失敗: {0}", "Échec de la restauration du HDR : {0}", "Error al restaurar HDR: {0}", "Falha ao restaurar HDR: {0}", "HDR-Wiederherstellung fehlgeschlagen: {0}" } },
+    };
+
+    public static string T(string key)
+    {
+        string[] vals;
+        if (Table.TryGetValue(key, out vals))
+        {
+            int idx = Array.IndexOf(Codes, Current);
+            if (idx >= 0 && idx < vals.Length && vals[idx] != null)
+                return vals[idx];
+            return vals[2]; // 回退到英语
+        }
+        return key;
+    }
+
+    public static string T(string key, params object[] args)
+    {
+        return string.Format(T(key), args);
+    }
+
+    public static string On { get { return T("ON"); } }
+    public static string Off { get { return T("OFF"); } }
+
+    public static string SavePath
+    {
+        get { return Path.Combine(Path.GetDirectoryName(HdrMonitor.ConfigPath), "language.cfg"); }
+    }
+
+    // 优先级: 用户保存的选择 > 系统语言 > 英语
+    public static void Init()
+    {
+        try
+        {
+            if (File.Exists(SavePath))
+            {
+                string saved = File.ReadAllText(SavePath).Trim();
+                if (Array.IndexOf(Codes, saved) >= 0)
+                {
+                    Current = saved;
+                    return;
+                }
+            }
+        }
+        catch { }
+        Current = Detect();
+    }
+
+    public static void Set(string code)
+    {
+        if (Array.IndexOf(Codes, code) < 0)
+            return;
+        Current = code;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(SavePath));
+            File.WriteAllText(SavePath, code);
+        }
+        catch { }
+    }
+
+    static string Detect()
+    {
+        string name = CultureInfo.CurrentUICulture.Name; // 如 zh-CN, ja-JP
+        if (name.StartsWith("zh"))
+        {
+            return (name.IndexOf("Hant") >= 0 || name.IndexOf("TW") >= 0
+                || name.IndexOf("HK") >= 0 || name.IndexOf("MO") >= 0) ? "zh-TW" : "zh-CN";
+        }
+        string two = name.Length >= 2 ? name.Substring(0, 2).ToLowerInvariant() : "";
+        switch (two)
+        {
+            case "ja": return "ja";
+            case "fr": return "fr";
+            case "es": return "es";
+            case "pt": return "pt";
+            case "de": return "de";
+            default: return Default; // 不在支持范围内显示英语
+        }
+    }
 }
 
 class HdrController
@@ -404,7 +545,7 @@ class HdrMonitor
                 loaded.Add(t);
         }
         if (loaded.Count == 0)
-            return "配置文件中没有有效的进程名（每行一个，# 或 ; 开头为注释）";
+            return Lang.T("LOG_NO_NAMES");
 
         Names.Clear();
         Names.AddRange(loaded);
@@ -466,30 +607,30 @@ class HdrMonitor
             {
                 _originalHdrEnabled = enabled;
                 _hdrHeld = true;
-                OnLog("检测到目标进程启动。原 HDR 状态: " + (enabled ? "开" : "关"));
+                OnLog(Lang.T("LOG_DETECTED", enabled ? Lang.On : Lang.Off));
                 if (!enabled)
                 {
                     string error;
                     if (Hdr.SetHdr(true, out error))
                     {
                         CurrentHdrEnabled = true;
-                        OnLog("已打开主显示器 HDR。");
+                        OnLog(Lang.T("LOG_HDR_ON"));
                         OnHdrStateChanged(true);
                     }
                     else
                     {
-                        OnLog("打开 HDR 失败: " + error);
+                        OnLog(Lang.T("LOG_HDR_ON_FAIL", error));
                     }
                 }
                 else
                 {
-                    OnLog("HDR 已开启，保持不变。");
+                    OnLog(Lang.T("LOG_HDR_KEPT"));
                 }
             }
         }
         else if (!nowRunning && _anyRunning)
         {
-            OnLog("目标进程已全部退出。");
+            OnLog(Lang.T("LOG_ALL_EXITED"));
             RestoreHdr();
         }
         _anyRunning = nowRunning;
@@ -509,12 +650,12 @@ class HdrMonitor
         if (Hdr.SetHdr(_originalHdrEnabled, out error))
         {
             CurrentHdrEnabled = _originalHdrEnabled;
-            OnLog("已恢复 HDR 状态: " + (_originalHdrEnabled ? "开" : "关"));
+            OnLog(Lang.T("LOG_RESTORED", _originalHdrEnabled ? Lang.On : Lang.Off));
             OnHdrStateChanged(_originalHdrEnabled);
         }
         else
         {
-            OnLog("恢复 HDR 失败: " + error);
+            OnLog(Lang.T("LOG_RESTORE_FAIL", error));
         }
     }
 
@@ -535,7 +676,16 @@ class MainForm : Form
     private readonly System.Windows.Forms.Timer _timer;
     private readonly NotifyIcon _tray;
     private readonly Label _lblHdr;
+    private readonly GroupBox _grpConfig;
     private readonly ListBox _lstNames;
+    private readonly Button _btnAdd;
+    private readonly Button _btnRemove;
+    private readonly Button _btnSave;
+    private readonly Button _btnOpenConfig;
+    private readonly Button _btnHide;
+    private readonly ToolStripMenuItem _menuLang;
+    private readonly ToolStripMenuItem _trayShow;
+    private readonly ToolStripMenuItem _trayExit;
     private readonly TextBox _txtLog;
     private Icon _iconOn;
     private Icon _iconOff;
@@ -543,78 +693,90 @@ class MainForm : Form
 
     public MainForm()
     {
+        Lang.Init();
+
         Text = "HDR Auto Switcher";
-        ClientSize = new Size(560, 500);
+        ClientSize = new Size(560, 524);
         StartPosition = FormStartPosition.CenterScreen;
         MinimizeBox = true;
         MaximizeBox = false;
         FormBorderStyle = FormBorderStyle.FixedSingle;
 
+        // 语言选择菜单
+        _menuLang = new ToolStripMenuItem();
+        foreach (var code in Lang.Codes)
+        {
+            var item = new ToolStripMenuItem(Lang.DisplayName(code));
+            item.Tag = code;
+            item.Click += LanguageClicked;
+            _menuLang.DropDownItems.Add(item);
+        }
+        var menuStrip = new MenuStrip();
+        menuStrip.Items.Add(_menuLang);
+        MainMenuStrip = menuStrip;
+        Controls.Add(menuStrip);
+
         _lblHdr = new Label();
-        _lblHdr.SetBounds(12, 10, 536, 20);
+        _lblHdr.SetBounds(12, 34, 536, 20);
         _lblHdr.Font = new Font(Font.FontFamily, 10, FontStyle.Bold);
 
-        var grpConfig = new GroupBox();
-        grpConfig.Text = "监控的进程";
-        grpConfig.SetBounds(12, 36, 536, 158);
+        _grpConfig = new GroupBox();
+        _grpConfig.SetBounds(12, 60, 536, 158);
 
         _lstNames = new ListBox();
         _lstNames.SetBounds(10, 20, 380, 128);
 
-        var btnAdd = new Button();
-        btnAdd.Text = "添加 exe...";
-        btnAdd.SetBounds(400, 20, 126, 34);
-        btnAdd.Click += delegate { AddExe(); };
+        _btnAdd = new Button();
+        _btnAdd.SetBounds(400, 20, 126, 34);
+        _btnAdd.Click += delegate { AddExe(); };
 
-        var btnRemove = new Button();
-        btnRemove.Text = "删除选中";
-        btnRemove.SetBounds(400, 62, 126, 34);
-        btnRemove.Click += delegate { RemoveSelected(); };
+        _btnRemove = new Button();
+        _btnRemove.SetBounds(400, 62, 126, 34);
+        _btnRemove.Click += delegate { RemoveSelected(); };
 
-        var btnSave = new Button();
-        btnSave.Text = "保存配置";
-        btnSave.SetBounds(400, 104, 126, 44);
-        btnSave.Click += delegate { SaveConfig(); };
+        _btnSave = new Button();
+        _btnSave.SetBounds(400, 104, 126, 44);
+        _btnSave.Click += delegate { SaveConfig(); };
 
-        grpConfig.Controls.Add(_lstNames);
-        grpConfig.Controls.Add(btnAdd);
-        grpConfig.Controls.Add(btnRemove);
-        grpConfig.Controls.Add(btnSave);
+        _grpConfig.Controls.Add(_lstNames);
+        _grpConfig.Controls.Add(_btnAdd);
+        _grpConfig.Controls.Add(_btnRemove);
+        _grpConfig.Controls.Add(_btnSave);
 
         _txtLog = new TextBox();
-        _txtLog.SetBounds(12, 204, 536, 246);
+        _txtLog.SetBounds(12, 228, 536, 246);
         _txtLog.Multiline = true;
         _txtLog.ReadOnly = true;
         _txtLog.ScrollBars = ScrollBars.Vertical;
         _txtLog.BackColor = Color.White;
 
-        var btnOpenConfig = new Button();
-        btnOpenConfig.Text = "打开配置文件";
-        btnOpenConfig.SetBounds(12, 460, 130, 30);
-        btnOpenConfig.Click += delegate { OpenConfigFile(); };
+        _btnOpenConfig = new Button();
+        _btnOpenConfig.SetBounds(12, 484, 150, 30);
+        _btnOpenConfig.Click += delegate { OpenConfigFile(); };
 
-        var btnHide = new Button();
-        btnHide.Text = "隐藏到托盘";
-        btnHide.SetBounds(428, 460, 120, 30);
-        btnHide.Click += delegate { HideToTray(); };
+        _btnHide = new Button();
+        _btnHide.SetBounds(398, 484, 150, 30);
+        _btnHide.Click += delegate { HideToTray(); };
 
         Controls.Add(_lblHdr);
-        Controls.Add(grpConfig);
+        Controls.Add(_grpConfig);
         Controls.Add(_txtLog);
-        Controls.Add(btnOpenConfig);
-        Controls.Add(btnHide);
+        Controls.Add(_btnOpenConfig);
+        Controls.Add(_btnHide);
 
         _iconOff = CreateIcon(false);
         _iconOn = CreateIcon(true);
         Icon = _iconOff;
 
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("显示窗口", null, delegate { ShowWindow(); });
-        menu.Items.Add("退出", null, delegate { ExitApp(); });
+        var trayMenu = new ContextMenuStrip();
+        _trayShow = new ToolStripMenuItem(null, null, delegate { ShowWindow(); });
+        _trayExit = new ToolStripMenuItem(null, null, delegate { ExitApp(); });
+        trayMenu.Items.Add(_trayShow);
+        trayMenu.Items.Add(_trayExit);
         _tray = new NotifyIcon();
         _tray.Text = "HDR Auto Switcher";
         _tray.Icon = _iconOff;
-        _tray.ContextMenuStrip = menu;
+        _tray.ContextMenuStrip = trayMenu;
         _tray.Visible = true;
         _tray.DoubleClick += delegate { ShowWindow(); };
 
@@ -624,14 +786,14 @@ class MainForm : Form
         string error;
         if (!_monitor.InitDisplay(out error))
         {
-            Log(error);
+            Log(Lang.T("LOG_DISPLAY_FAIL", error));
         }
         else if (!_monitor.Hdr.Supported)
         {
-            Log("警告: 主显示器不支持 HDR，将仅监控进程而不切换 HDR。");
+            Log(Lang.T("WARN_UNSUPPORTED"));
         }
-        UpdateHdrLabel();
 
+        ApplyLanguage();
         LoadConfig();
 
         _timer = new System.Windows.Forms.Timer();
@@ -640,16 +802,40 @@ class MainForm : Form
         _timer.Start();
     }
 
+    private void LanguageClicked(object sender, EventArgs e)
+    {
+        var item = (ToolStripMenuItem)sender;
+        Lang.Set((string)item.Tag);
+        ApplyLanguage();
+    }
+
+    private void ApplyLanguage()
+    {
+        Text = "HDR Auto Switcher";
+        _menuLang.Text = Lang.T("MENU_LANG");
+        foreach (ToolStripMenuItem item in _menuLang.DropDownItems)
+            item.Checked = (string)item.Tag == Lang.Current;
+        _grpConfig.Text = Lang.T("GRP_PROCESSES");
+        _btnAdd.Text = Lang.T("BTN_ADD");
+        _btnRemove.Text = Lang.T("BTN_REMOVE");
+        _btnSave.Text = Lang.T("BTN_SAVE");
+        _btnOpenConfig.Text = Lang.T("BTN_OPEN_CONFIG");
+        _btnHide.Text = Lang.T("BTN_HIDE");
+        _trayShow.Text = Lang.T("TRAY_SHOW");
+        _trayExit.Text = Lang.T("TRAY_EXIT");
+        UpdateHdrLabel();
+    }
+
     private void LoadConfig()
     {
         string err = _monitor.LoadConfig();
         if (err != null)
         {
-            Log(err + "，请点击“添加 exe...”选择要监控的程序，然后保存配置。");
+            Log(err + "。" + Lang.T("LOG_NO_NAMES_HINT"));
         }
         else
         {
-            Log("已加载配置，监控: " + string.Join(", ", _monitor.Names.ToArray()));
+            Log(Lang.T("LOG_LOADED", string.Join(", ", _monitor.Names.ToArray())));
         }
         RefreshNameList();
     }
@@ -665,8 +851,8 @@ class MainForm : Form
     {
         using (var dlg = new OpenFileDialog())
         {
-            dlg.Title = "选择要监控的程序（可多选）";
-            dlg.Filter = "可执行文件 (*.exe)|*.exe|所有文件 (*.*)|*.*";
+            dlg.Title = Lang.T("DLG_ADD_TITLE");
+            dlg.Filter = Lang.T("DLG_ADD_FILTER");
             dlg.Multiselect = true;
             if (dlg.ShowDialog(this) != DialogResult.OK)
                 return;
@@ -682,7 +868,7 @@ class MainForm : Form
             }
             RefreshNameList();
             if (added > 0)
-                Log("已添加 " + added + " 个进程（尚未保存，点击“保存配置”生效）。");
+                Log(Lang.T("LOG_ADDED", added));
         }
     }
 
@@ -693,7 +879,7 @@ class MainForm : Form
         var name = (string)_lstNames.SelectedItem;
         _monitor.Names.Remove(name);
         RefreshNameList();
-        Log("已移除 " + name + "（尚未保存，点击“保存配置”生效）。");
+        Log(Lang.T("LOG_REMOVED", name));
     }
 
     private void OpenConfigFile()
@@ -706,7 +892,7 @@ class MainForm : Form
         }
         catch (Exception ex)
         {
-            Log("打开配置文件失败: " + ex.Message);
+            Log(Lang.T("LOG_OPEN_FAIL", ex.Message));
         }
     }
 
@@ -716,11 +902,11 @@ class MainForm : Form
         {
             _monitor.SaveConfig();
             LoadConfig();
-            Log("配置已保存到 " + HdrMonitor.ConfigPath + " 并立即生效。");
+            Log(Lang.T("LOG_SAVED", HdrMonitor.ConfigPath));
         }
         catch (Exception ex)
         {
-            Log("保存配置失败: " + ex.Message);
+            Log(Lang.T("LOG_SAVE_FAIL", ex.Message));
         }
     }
 
@@ -747,15 +933,15 @@ class MainForm : Form
 
     private void UpdateHdrLabel()
     {
-        _lblHdr.Text = "主显示器 HDR: " + (_monitor.CurrentHdrEnabled ? "开" : "关")
-            + (_monitor.Hdr.Supported ? "" : "（显示器不支持 HDR）");
+        _lblHdr.Text = Lang.T("HDR_STATUS", _monitor.CurrentHdrEnabled ? Lang.On : Lang.Off)
+            + (_monitor.Hdr.Supported ? "" : Lang.T("HDR_UNSUPPORTED_SUFFIX"));
         _lblHdr.ForeColor = _monitor.CurrentHdrEnabled ? Color.DarkOrange : Color.DimGray;
     }
 
     private void HideToTray()
     {
         Hide();
-        _tray.ShowBalloonTip(2000, "HDR Auto Switcher", "已隐藏到托盘，双击图标可重新打开窗口。", ToolTipIcon.Info);
+        _tray.ShowBalloonTip(2000, "HDR Auto Switcher", Lang.T("BALLOON_HIDE"), ToolTipIcon.Info);
     }
 
     private void ShowWindow()
@@ -834,6 +1020,7 @@ class Program
 
         // 有参数：控制台模式（输出附加到调用方终端）
         NativeMethods.AttachConsole(0xFFFFFFFF);
+        Lang.Init();
 
         if (args.Length == 1 && args[0] == "--probe")
         {

@@ -19,6 +19,7 @@
 - 点关闭按钮或最小化都会隐藏到右下角托盘（通知区域），双击托盘图标重新打开窗口
 - 托盘图标颜色表示状态：灰色 = HDR 关，橙色 = HDR 开；HDR 切换时弹出气泡通知
 - 托盘右键菜单：显示窗口 / 退出（退出时恢复 HDR 状态）
+- 多语言界面：简体中文、繁體中文、English、日本語、Français、Español、Português、Deutsch；首次启动跟随系统语言（不支持的语言回退到英语），通过顶部"语言"菜单切换并自动记住选择
 
 ### 环境要求
 
@@ -74,6 +75,7 @@ A Windows tray utility that watches specific processes and automatically toggles
 - Closing or minimizing the window hides it to the system tray (notification area); double-click the tray icon to reopen
 - Tray icon color indicates state: gray = HDR off, orange = HDR on; a balloon notification appears on every toggle
 - Tray context menu: Show window / Exit (HDR state is restored on exit)
+- Multilingual UI: 简体中文, 繁體中文, English, 日本語, Français, Español, Português, Deutsch; follows the system language on first launch (falls back to English for unsupported languages) — switch anytime via the Language menu, the choice is remembered
 
 ### Requirements
 
